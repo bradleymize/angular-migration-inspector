@@ -1,0 +1,31 @@
+{
+  "name": "angular-migration-inspector",
+  "version": "0.0.0",
+  "description": "Analyzes angular code for potential migration issues",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bradleymize/angular-migration-inspector.git"
+  },
+  "keywords": [
+    "angular",
+    "angularjs",
+    "migration"
+  ],
+  "author": "Bradley Mize",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/bradleymize/angular-migration-inspector/issues"
+  },
+  "homepage": "https://github.com/bradleymize/angular-migration-inspector",
+  "dependencies": {
+    "esprima": "^2.7.2",
+    "globby": "^4.0.0",
+    "htmlparser2": "^3.9.0",
+    "lex": "^1.7.9",
+    "semver": "^5.1.0"
+  }
+}
