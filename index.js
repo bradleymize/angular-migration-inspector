@@ -12,6 +12,7 @@ var AngularMigrationInspector = function(glob, currentVersion) {
   self.version = "0.0.0";
   self.nextVersion = "0.1.0";
   self.glob = null;
+  self.suppressInfo = false;
   self.results = null;
   self.cache = {};
   self.filesReferencingTemplate = {};
@@ -59,8 +60,9 @@ var AngularMigrationInspector = function(glob, currentVersion) {
           var element = _.get(value,predicateKeys[i]);
           var predicateValue = predicateObj[predicateKeys[i]];
           if(_.isUndefined(element) ||
-            (predicateValue.indexOf("contains") !== 0 && element !== predicateValue) ||
-            (predicateValue.indexOf("contains") === 0 && element.indexOf(_.tail(predicateValue.split(":")).join(":")) === -1)
+            (predicateValue.split(":").length === 1 && element !== predicateValue) ||
+            (predicateValue.indexOf("contains") === 0 && element.indexOf(_.tail(predicateValue.split(":")).join(":")) === -1) ||
+            (predicateValue.indexOf("matches") === 0 && !element.match(_.tail(predicateValue.split(":")).join(":")))
           ) {
             found = false;
             break;
@@ -117,6 +119,9 @@ var AngularMigrationInspector = function(glob, currentVersion) {
       self.glob.push(pattern);
     }
   }
+  function suppressInfo(doSuppress) {
+    self.suppressInfo = doSuppress;
+  }
   function analyze() {
     if(!self.glob) {
       throw new Error("No glob patterns specified");
@@ -149,7 +154,9 @@ var AngularMigrationInspector = function(glob, currentVersion) {
     readline.cursorTo(process.stdout, 0);
     process.stdout.write("Progress: 100%\n\n");
     _.forEach(self.results, function(result) {
-      console.log(result);
+      if(!self.suppressInfo || (self.suppressInfo && result.indexOf(" INFO: ") === -1)) {
+        console.log(result);
+      }
     });
   }
   function analyze13to14(contents, file) {
@@ -160,13 +167,17 @@ var AngularMigrationInspector = function(glob, currentVersion) {
     if(_.endsWith(file,".html")) {
       parsedContent = new htmlparser2.Parser(get13HtmlParserOptions(), {decodeEntities: true});
     }
-    //if(file === "web-app/js/app/configure/addressType/list/addressType.list.js") {
-    //  console.log(JSON.stringify(parsedContent, null, 2));
-    //}
+    //TODO: remove
+    if(file === "web-app/js/common/directives/dateTimePicker/dateTimePicker.js") {
+      //console.log("\n"+JSON.stringify(parsedContent, null, 2));
+    }
 
     if(_.endsWith(file,".js")) {
       hasTemplateUrlDeclaration(parsedContent,file);
       animateSearch13(parsedContent,file);
+      cookie13(parsedContent,file);
+      http13(parsedContent,file);
+      compile13(parsedContent,file);
     }
     if(_.endsWith(file,".html")) {
       self.htmlParser.currentFile = file;
@@ -176,6 +187,7 @@ var AngularMigrationInspector = function(glob, currentVersion) {
   }
 
   //=============== 1.3.x ====================
+  //TODO: $compile
   function animateSearch13(parsedContents, file) {
     var params = [
       {
@@ -231,6 +243,59 @@ var AngularMigrationInspector = function(glob, currentVersion) {
       }
     }
   }
+  function http13(parsedContents, file) {
+    var params = [
+      {
+        key: {"type":"Property", "key.name": "transformRequest", "value.type": "FunctionExpression"},
+        message: "WARNING: transformRequest found. Inspect to make sure it does not modify headers"
+      }
+    ];
+    for(var i = 0; i < params.length; i++) {
+      var paths = find(parsedContents, params[i].key);
+      for(var j = 0; j < paths.length; j++) {
+        var obj = _.get(parsedContents, paths[j]);
+        self.results.push(file+" (Line: "+ obj.loc.start.line +":"+obj.loc.start.column+"): "+ params[i].message);
+      }
+    }
+  }
+  function compile13(parsedContents, file) {
+    var params = [
+      {
+        key: {"type":"Property", "value.raw": "matches:^'&[\\w]+\\?'$"},
+        message: "WARNING: possible optional functional expression directive parameter found. Optional expressions parameters no longer create a function on the scope."
+      }
+    ];
+    for(var i = 0; i < params.length; i++) {
+      var paths = find(parsedContents, params[i].key);
+      for(var j = 0; j < paths.length; j++) {
+        var obj = _.get(parsedContents, paths[j]);
+        self.results.push(file+" (Line: "+ obj.loc.start.line +":"+obj.loc.start.column+"): "+ params[i].message);
+      }
+    }
+  }
+  function cookie13(parsedContents, file) {
+    var params = [
+      {
+        key: {"type":"AssignmentExpression", "left.object.name": "$cookies"},
+        message: "WARNING: $cookies now has it's own api. Refactor to use it."
+      },
+      {
+        key: {"type":"VariableDeclarator", "init.object.name": "$cookies"},
+        message: "WARNING: $cookies now has it's own api. Refactor to use it."
+      },
+      {
+        key: {"type":"CallExpression", "callee.object.name": "$cookieStore"},
+        message: "WARNING: $cookieStore is deprecated. Use $cookies instead."
+      }
+    ];
+    for(var i = 0; i < params.length; i++) {
+      var paths = find(parsedContents, params[i].key);
+      for(var j = 0; j < paths.length; j++) {
+        var obj = _.get(parsedContents, paths[j]);
+        self.results.push(file+" (Line: "+ obj.loc.start.line +":"+obj.loc.start.column+"): "+ params[i].message);
+      }
+    }
+  }
   function get13HtmlParserOptions() {
     var options = {
       onopentag: function(name, attrs) {
@@ -248,6 +313,12 @@ var AngularMigrationInspector = function(glob, currentVersion) {
             }
           }
         }
+        if(attrs["ng-repeat"] || attrs["data-ng-repeat"]) {
+          msg = self.htmlParser.currentFile+": INFO: ng-repeat is no longer sorted.";
+          if(self.results.indexOf(msg) === -1) {
+            self.results.push(msg);
+          }
+        }
         if((attrs["ng-messages"] || attrs["data-ng-messages"]) && attrs["ng-messages-include"] || attrs["data-ng-messages-include"]) {
           msg = self.htmlParser.currentFile+": WARNING: 'ng-messages' and 'ng-messages-include' on the same element. Separate them.";
           if(self.results.indexOf(msg) === -1) {
@@ -258,6 +329,16 @@ var AngularMigrationInspector = function(glob, currentVersion) {
           msg = self.htmlParser.currentFile+": WARNING: 'select' now uses strict comparison. If the value is a non-string: initialize the model to a string, or use $formatters/$parsers on ngModel";
           if(self.results.indexOf(msg) === -1) {
             self.results.push(msg);
+          }
+        }
+        if(name === "form" && (attrs["name"] || attrs["data-name"])) {
+          //console.log("\n"+self.htmlParser.currentFile+" - form name: "+(attrs["name"] || attrs["data-name"]));
+          var formName = attrs["name"] || attrs["data-name"];
+          if(!formName.match(/^[a-zA-Z0-9\+\-\.\[\]]+$/)) {
+            msg = self.htmlParser.currentFile+": WARNING: form attribute 'name' can no longer have special characters. See angular docs for rare exceptions.";
+            if(self.results.indexOf(msg) === -1) {
+              self.results.push(msg);
+            }
           }
         }
       },
@@ -278,7 +359,8 @@ var AngularMigrationInspector = function(glob, currentVersion) {
     setGlob: setGlob,
     addGlobPattern: addGlobPattern,
     addGlob: addGlob,
-    analyze: analyze
+    analyze: analyze,
+    suppressInfo: suppressInfo
   };
   return plugin;
 };
